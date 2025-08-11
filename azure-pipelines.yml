@@ -1,0 +1,47 @@
+trigger: none
+pr:
+  branches:
+    include:
+      - main
+
+stages:
+- stage: Analyze
+  jobs:
+  - job: RunAnalyzers
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+    - task: UseDotNet@2
+      inputs:
+        packageType: 'sdk'
+        version: '8.x'
+    - script: dotnet restore
+      displayName: 'Restore packages'
+    - script: dotnet build --no-restore -warnaserror
+      displayName: 'Build with analyzers'
+
+- stage: AIReview
+  dependsOn: Analyze
+  condition: succeeded()
+  jobs:
+  - job: CommentPR
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+      persistCredentials: true
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+    - script: |
+        pip install openai azure-devops requests
+        python scripts/ai_review.py \
+          --pr $(System.PullRequest.PullRequestId) \
+          --repo $(Build.Repository.ID) \
+          --project $(System.TeamProject) \
+          --org $(System.CollectionUri)
+      env:
+        OPENAI_API_KEY: $(OpenAIApiKey)
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      displayName: 'Run AI code review'
